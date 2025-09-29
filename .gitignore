@@ -1,0 +1,7 @@
+*.pcapng
+*.jpeg
+.idea/
+.DS_Store
+.vscode/
+main
+attachment/
