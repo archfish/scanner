@@ -1,0 +1,108 @@
+name: Build and Release
+
+on:
+  push:
+    tags: # 当有新的tag被推送时触发
+      - 'v*.*.*'
+  workflow_dispatch: # 允许手动触发工作流
+
+jobs:
+  release-amd64:
+    name: Build Release (AMD64)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libusb-1.0-0-dev build-essential
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.2'
+
+      - name: Build binary
+        run: |
+          CGO_ENABLED=1 go build -o scanner-amd64 ./cmd/main.go
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: scanner-amd64
+          path: scanner-amd64
+
+  release-arm64:
+    name: Build Release (ARM64)
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libusb-1.0-0-dev build-essential
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.2'
+
+      - name: Build binary
+        run: |
+          CGO_ENABLED=1 GOOS=linux GOARCH=arm64 go build -o scanner-arm64 ./cmd/main.go
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: scanner-arm64
+          path: scanner-arm64
+
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: [release-amd64, release-arm64]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.2'
+
+      - name: Install GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          install-only: true
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Extract binaries and make them executable
+        run: |
+          mkdir release
+          mv scanner-amd64/scanner-amd64 release/
+          mv scanner-arm64/scanner-arm64 release/
+          chmod +x release/*
+
+          rm -rf scanner-amd64 scanner-arm64
+          mv release/* ./
+          rm -rf release
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: latest
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.TOKEN }}
