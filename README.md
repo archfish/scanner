@@ -103,7 +103,7 @@ brew install libusb
 
 1. 克隆项目代码：
    ```bash
-   git clone <repository-url>
+   git clone https://github.com/archfish/scanner
    cd scanner
    ```
 

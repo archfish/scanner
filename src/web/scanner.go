@@ -1,7 +1,6 @@
 package web
 
 import (
-	"embed"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -12,40 +11,20 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-//go:embed index.html
-var webFiles embed.FS
-
 // 扫描件存储位置
 var DefaultAttachmentPath = "./attachment"
 
 func AddWebRoutes(r *gin.RouterGroup) {
-	// 提供静态文件服务（如果src/web目录存在）
-	if _, err := os.Stat("./web"); err == nil {
-		// 提供index.html文件
-		r.GET("/", func(c *gin.Context) {
-			c.File("./web/index.html")
-		})
-	} else {
-		// 否则使用嵌入的文件
-		r.GET("/", func(c *gin.Context) {
-			file, err := webFiles.ReadFile("index.html")
-			if err != nil {
-				c.String(http.StatusNotFound, "File not found")
-				return
-			}
-			c.Data(http.StatusOK, "text/html; charset=utf-8", file)
-		})
-	}
-
 	// 确保附件目录存在
 	if _, err := os.Stat(DefaultAttachmentPath); os.IsNotExist(err) {
 		os.MkdirAll(DefaultAttachmentPath, 0755)
 	}
 
+	// 先注册API路由
 	r.Group("/api").
 		POST("/scan", Scan).
 		GET("/devices", ListUSBDevice).
-		GET("/download/:attachID", Download) // 使用附件ID下载
+		GET("/download/:attachID", Download)
 }
 
 // ListUSBDevice 查看本机所有USB设备
