@@ -56,8 +56,12 @@ func Scan(ctx *gin.Context) {
 		}
 	}
 
-	// 创建M7206扫描器实例
-	scan := scanner.NewCommonScanner(req.Device, scanner.DefaultDeviceOptions)
+	// 使用工厂模式创建扫描器实例
+	scan, err := scanner.NewScanner(req.Device, scanner.DefaultDeviceOptions)
+	if err != nil {
+		RenderError(ctx, err, http.StatusInternalServerError, nil)
+		return
+	}
 
 	// 初始化USB上下文
 	if err := scan.Connect(); err != nil {

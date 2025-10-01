@@ -2,12 +2,13 @@ package scanner
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 
 	"github.com/google/gousb"
 )
 
-type DeviceState struct {
+// brotherDeviceState Brother扫描仪设备状态（隐藏在内部实现中）
+type brotherDeviceState struct {
 	ctx    *gousb.Context
 	device *gousb.Device
 
@@ -17,7 +18,8 @@ type DeviceState struct {
 	in  *gousb.InEndpoint
 }
 
-func (ds *DeviceState) Close() (err error) {
+// Close 关闭设备连接
+func (ds *brotherDeviceState) Close() (err error) {
 	if ds.cif != nil {
 		ds.cif.Close()
 	}
@@ -39,45 +41,47 @@ func (ds *DeviceState) Close() (err error) {
 	return err
 }
 
-func open(vendorID, productID uint16, opts DeviceOptions) *DeviceState {
-	state := &DeviceState{
+// openBrotherDevice 打开Brother扫描仪设备
+func openBrotherDevice(vendorID, productID uint16, opts DeviceOptions) *brotherDeviceState {
+	state := &brotherDeviceState{
 		ctx: gousb.NewContext(),
 	}
 	dev, err := state.ctx.OpenDeviceWithVIDPID(gousb.ID(vendorID), gousb.ID(productID))
 	if err != nil {
-		log.Printf(err.Error())
+		slog.Error("open device with VID/PID", "error", err)
 		return state
 	}
 	state.device = dev
 
 	state.cfg, err = state.device.Config(opts.ConfigNum)
 	if err != nil {
-		log.Printf("select usb device config: %w", err)
+		slog.Error("select usb device config", "error", err)
 		return state
 	}
 
 	state.cif, err = state.cfg.Interface(opts.InterfaceNum, opts.InterfaceAlt)
 	if err != nil {
-		log.Printf("claim usb device interface: %w", err)
+		slog.Error("claim usb device interface", "error", err)
 		return state
 	}
 
 	state.out, err = state.cif.OutEndpoint(opts.OutEndpointNum)
 	if err != nil {
-		log.Printf("open out endpoint: %w", err)
+		slog.Error("open out endpoint", "error", err)
 		return state
 	}
 
 	state.in, err = state.cif.InEndpoint(opts.InEndpointNum)
 	if err != nil {
-		log.Printf("open in endpoint: %w", err)
+		slog.Error("open in endpoint", "error", err)
 		return state
 	}
 
 	return state
 }
 
-type scanRequest struct {
+// brotherScanRequest Brother扫描请求参数
+type brotherScanRequest struct {
 	horizontalDPI, verticalDPI uint16
 	mode                       ScanMode
 	compression                Compression
@@ -86,12 +90,13 @@ type scanRequest struct {
 	left, top, width, height   uint16
 }
 
-func (req scanRequest) Bytes() []byte {
+func (req brotherScanRequest) Bytes() []byte {
 	executeScan := "\x1bX\x0aR=%d,%d\x0aM=%s\x0aC=%s\x0aJ=MID\x0aB=%d\x0aN=%d\x0aA=%d,%d,%d,%d\x0aS=NORMAL_SCAN\x0aP=0\x0aG=0\x0aL=0\x0a\x80"
 	return []byte(fmt.Sprintf(executeScan, req.horizontalDPI, req.verticalDPI, req.mode, req.compression, req.brightness, req.contrast, req.left, req.top, req.width, req.height))
 }
 
-type negotiateResponse struct {
+// brotherNegotiateResponse Brother协商响应
+type brotherNegotiateResponse struct {
 	unknown                    [3]byte
 	horizontalDPI, verticalDPI uint16 // or the other way around, always the same?
 	unknown2                   uint16
@@ -99,7 +104,7 @@ type negotiateResponse struct {
 	scanHeight, outHeight      uint16
 }
 
-func (nr *negotiateResponse) parse(d []byte) error {
+func (nr *brotherNegotiateResponse) parse(d []byte) error {
 	if len(d) < 10 {
 		return fmt.Errorf("too short")
 	}
@@ -111,6 +116,6 @@ func (nr *negotiateResponse) parse(d []byte) error {
 	return nil
 }
 
-var negotiateRequest = func(resolution uint16, mode ScanMode) []byte {
+var brotherNegotiateRequest = func(resolution uint16, mode ScanMode) []byte {
 	return []byte(fmt.Sprintf("\x1bI\x0aR=%d,%d\x0aM=%s\x0a\x80", resolution, resolution, mode))
 }

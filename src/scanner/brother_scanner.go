@@ -6,39 +6,31 @@ import (
 	"time"
 )
 
-var _ Scanner = (*CommonScanner)(nil)
+var _ Scanner = (*BrotherScanner)(nil)
+
 var (
 	ResponseTimeoutIt   = 100
 	WaitBetweenRequests = 30 * time.Millisecond
 )
 
-// Scanner 抽象一个扫描仪设备
-type Scanner interface {
-	// Connect 连接一个设备
-	Connect() error
-	// Scan 开始扫描
-	Scan(out io.Writer, opts ScanOptions) error
-	// Close 断开扫描仪
-	Disconnect() error
-}
-
-// CommonScanner 通用扫描仪
-type CommonScanner struct {
+// BrotherScanner Brother扫描仪实现
+type BrotherScanner struct {
 	usb  DeviceInfo
 	opts DeviceOptions
 
-	state *DeviceState
+	state *brotherDeviceState
 }
 
-func NewCommonScanner(usb DeviceInfo, opts DeviceOptions) *CommonScanner {
-	return &CommonScanner{
+// NewBrotherScanner 创建Brother扫描仪实例
+func NewBrotherScanner(usb DeviceInfo, opts DeviceOptions) *BrotherScanner {
+	return &BrotherScanner{
 		usb:  usb,
 		opts: opts,
 	}
 }
 
-func (scanner *CommonScanner) Connect() error {
-	scanner.state = open(scanner.usb.ParseVendorID(), scanner.usb.ParseProductID(), scanner.opts)
+func (scanner *BrotherScanner) Connect() error {
+	scanner.state = openBrotherDevice(scanner.usb.ParseVendorID(), scanner.usb.ParseProductID(), scanner.opts)
 	if scanner.state.device == nil {
 		return fmt.Errorf("打开设备失败！")
 	}
@@ -46,7 +38,7 @@ func (scanner *CommonScanner) Connect() error {
 	return nil
 }
 
-func (scanner *CommonScanner) Scan(out io.Writer, opts ScanOptions) error {
+func (scanner *BrotherScanner) Scan(out io.Writer, opts ScanOptions) error {
 	if err := scanner.control(1); err != nil {
 		return fmt.Errorf("1st pre-init control transfer: %w", err)
 	}
@@ -72,7 +64,7 @@ func (scanner *CommonScanner) Scan(out io.Writer, opts ScanOptions) error {
 	top := mmToPixels(opts.Top, neg.verticalDPI)
 	left := mmToPixels(opts.Left, neg.horizontalDPI)
 
-	if err := scanner.startScan(scanRequest{
+	if err := scanner.startScan(brotherScanRequest{
 		horizontalDPI: neg.horizontalDPI,
 		verticalDPI:   neg.verticalDPI,
 		mode:          opts.Mode,
@@ -97,12 +89,12 @@ func (scanner *CommonScanner) Scan(out io.Writer, opts ScanOptions) error {
 	return nil
 }
 
-func (scanner *CommonScanner) Disconnect() error {
+func (scanner *BrotherScanner) Disconnect() error {
 	return scanner.state.Close()
 }
 
 // We only see 0x0c0 control transfers, they always have value 0x0002 and index 0, the data is always 5 bytes long.
-func (scanner *CommonScanner) control(request uint8) error {
+func (scanner *BrotherScanner) control(request uint8) error {
 	data := make([]byte, 5)
 	_, err := scanner.state.device.Control(0xc0, request, 0x0002, 0, data)
 	if err != nil {
@@ -119,7 +111,7 @@ Response:
 0040   c1 00 1c 09 ff 3f 00 00 00 00 00 00 00 01 04 01   .....?..........
 0050   01 01 01 01 00 00 00 00 00 00 00 00 00 01         ..............
 */
-func (scanner *CommonScanner) queryCapabilities() ([]byte, error) {
+func (scanner *BrotherScanner) queryCapabilities() ([]byte, error) {
 	cmd := []byte{0x1b, 0x51, 0x0a, 0x80} // 0x51 = 'Q'
 	if _, err := scanner.state.out.Write(cmd); err != nil {
 		return nil, fmt.Errorf("sending request: %w", err)
@@ -142,8 +134,8 @@ Response:
 0040   00 1d 00 33 30 30 2c 33 30 30 2c 32 2c 32 30 39   ...300,300,2,209
 0050   2c 32 34 38 30 2c 32 39 31 2c 33 34 33 37 2c 00   ,2480,291,3437,.
 */
-func (scanner *CommonScanner) negotiateScannerSettings(opts ScanOptions) (*negotiateResponse, error) {
-	if _, err := scanner.state.out.Write(negotiateRequest(opts.DPI, opts.Mode)); err != nil {
+func (scanner *BrotherScanner) negotiateScannerSettings(opts ScanOptions) (*brotherNegotiateResponse, error) {
+	if _, err := scanner.state.out.Write(brotherNegotiateRequest(opts.DPI, opts.Mode)); err != nil {
 		return nil, fmt.Errorf("sending command: %w", err)
 	}
 	rawData, err := scanner.waitForResponse(281)
@@ -151,7 +143,7 @@ func (scanner *CommonScanner) negotiateScannerSettings(opts ScanOptions) (*negot
 		return nil, err
 	}
 
-	resp := &negotiateResponse{}
+	resp := &brotherNegotiateResponse{}
 	if err := resp.parse(rawData); err != nil {
 		return nil, fmt.Errorf("parse response: %w", err)
 	}
@@ -166,7 +158,7 @@ Request:
 Response:
 0040   d0                                                .
 */
-func (scanner *CommonScanner) postNegotiate() error {
+func (scanner *BrotherScanner) postNegotiate() error {
 	cmd := []byte{0x1b, 0x44, 0x0a, 0x41, 0x44, 0x46, 0x0a, 0x80}
 	if _, err := scanner.state.out.Write(cmd); err != nil {
 		return fmt.Errorf("send command: %w", err)
@@ -187,7 +179,7 @@ This is a preamble that sometimes starts a frame, it probably contains the lengt
 
 I'm currently ignoring that and just writing the whole file to output.
 */
-func (scanner *CommonScanner) readScanData(out io.Writer) error {
+func (scanner *BrotherScanner) readScanData(out io.Writer) error {
 	buf := make([]byte, 4096*4)
 	for {
 		n, err := scanner.state.in.Read(buf)
@@ -230,14 +222,14 @@ or
 
 in case of error?
 */
-func (scanner *CommonScanner) startScan(request scanRequest) error {
+func (scanner *BrotherScanner) startScan(request brotherScanRequest) error {
 	if _, err := scanner.state.out.Write(request.Bytes()); err != nil {
 		return fmt.Errorf("send command: %w", err)
 	}
 	return nil
 }
 
-func (scanner *CommonScanner) waitForResponse(len int) ([]byte, error) {
+func (scanner *BrotherScanner) waitForResponse(len int) ([]byte, error) {
 	buf := make([]byte, len)
 	for i := 0; ; i++ {
 		if i > ResponseTimeoutIt {
@@ -257,4 +249,29 @@ func (scanner *CommonScanner) waitForResponse(len int) ([]byte, error) {
 
 func mmToPixels(mm float64, dpi uint16) uint16 {
 	return uint16(mm * float64(dpi) / 25.4)
+}
+
+// BrotherScannerFactory Brother扫描仪工厂
+type BrotherScannerFactory struct{}
+
+// 确保BrotherScannerFactory实现了ScannerFactory接口
+var _ ScannerFactory = (*BrotherScannerFactory)(nil)
+
+// Match 检查是否匹配Brother设备
+func (bsf *BrotherScannerFactory) Match(usb DeviceInfo) bool {
+	// 可以根据VendorID来判断是否为Brother设备
+	// 这里简化处理，实际应该有完整的VendorID列表
+	vendorID := usb.ParseVendorID()
+	// Brother的VendorID通常是0x04f9
+	return vendorID == 0x04f9
+}
+
+// CreateScanner 创建Brother扫描仪实例
+func (bsf *BrotherScannerFactory) CreateScanner(usb DeviceInfo, opts DeviceOptions) Scanner {
+	return NewBrotherScanner(usb, opts)
+}
+
+// 注册Brother扫描仪工厂
+func init() {
+	GlobalDeviceRegistry.Register(&BrotherScannerFactory{})
 }

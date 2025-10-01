@@ -19,15 +19,21 @@ archives:
       {{- else if eq .Arch "386" }}i386
       {{- else if eq .Arch "arm64" }}aarch64
       {{- else }}{{ .Arch }}{{ end }}
-    format: tar.gz
+    format_overrides:
+      - goos: darwin
+        format: tar.gz
+      - goos: linux
+        format: tar.gz
+      - goos: windows
+        format: zip
     files:
       - README.md
       - LICENSE
       - scanner-amd64
       - scanner-arm64
 
-checksum:
-  name_template: "checksums.txt"
+snapshot:
+  name_template: "{{ incpatch .Version }}-next"
 
 release:
   github:
@@ -35,6 +41,7 @@ release:
     name: scanner
   draft: true
   prerelease: auto
+  mode: append
 
 changelog:
   sort: asc
